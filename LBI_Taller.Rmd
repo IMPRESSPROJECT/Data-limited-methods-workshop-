@@ -1,0 +1,403 @@
+---
+title: "Length Based Indicators (LBI)"
+author: "Paz"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    fig_caption: yes
+    toc: yes
+    toc_float: no
+subtitle: Aplicación a los stocks sur de abadejo y rape blanco
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "D:/psampedro/Documents/DATA_LIMITED_STOCKS/LBI")
+```
+
+## Length Based Indicators
+
+Se calculan un conjunto de indicadores basados en tallas para evaluar la composición de tallas de las capturas/desembarcos y clasificar los stocks de acuerdo a su estado de conservación, optimizacion de las capturas y al MSY. La metodología fue desarrollada por WKLIFE V (2015), aunque ya había sido definida previamente por Froese (2004).   
+
+Los indicadores del estado del stock se calculan de las distribuciones de frecuencia de talla y se comparan con los Puntos de Referencia (PR) calculados de los parámetros del ciclo vital, teoría ecológica o de la observación empírica. 
+
+Es de los métodos recomendados por ICES para estimar puntos de referencia de MSY en stocks de categoría 3 and 4 (ICES, 2018).   
+
+```{r Table1, warning=FALSE, message=FALSE, echo=FALSE}
+library(kableExtra)
+library(tidyverse)
+indicators_text <- data.frame(
+  Indicator = c("Lmax5%","L95%","Pmega","L25%","Lc","Lmean","Lmaxy","Lmean"), 
+  Calculation = c("Mean length of largest 5%", "95th percentile","Proportion of individuals above Lopt + 10%", "25th percentile of length distribution","Length at first catch (length at 50% of mode)", "Mean length of individuals > Lc", "Length class with maximum biomass in catch", "Mean length of individuals > Lc"),
+Reference = c ("Linf", "Linf","0.3-0.4","Lmat","Lmat", "Lopt = 2/3 Linf", "Lopt = 2/3 Linf *", "LF=M = (0.75Lc+0.25Linf)*"),
+IndicatorRatio = c("Lmax5% / Linf","L95% / Linf","Pmega","L25% / Lmat","Lc / Lmat","Lmean/Lopt","Lmaxy / Lopt","Lmean / LF=M"),
+ExpectedValue = c("> 0.8","> 0.8", "> 0.3","> 1","> 1","+- 1","+-1",">=1"),
+Property = c ("Conservation (large individuals)","","","Conservation (immatures)","", "Optimal yield", "", "MSY"))
+kable(indicators_text, escape=TRUE, caption = "Indicadores basados en tallas para evaluar estado de explotación de stocks") %>%
+  kable_styling("striped", full_width = F,position = "center") %>%
+   row_spec(1:3, bold = F, background = "#F2F3F4") %>%
+   row_spec(4:5, bold = F, background ="yellow") %>%
+   row_spec(6:7, bold = F, background ="#00FFFF") %>%
+   row_spec(8, bold = F, background ="#7FFFD0") %>%
+   footnote(symbol= c ("asumiendo M/K=1.5, teleósteos"), symbol_manual
+="*")
+```
+
+Con valores de M/k != 1.5:
+
+$L_{opt} = 3*L_{inf}/(3+(M/k))$
+
+$L_{F=M} = (1-a)*L_c + a*L_{inf}$
+  a=1/2*(M/k)+1
+
+### Información necesaria
+1. Frecuencias de talla de las capturas/desembarcos.   
+2. Parámetros de la historia vital:  
+
+    + Talla de madurez ($L_{mat}$)
+    + Parámetro de crecimiento de von Bertalanffy  ($L_{inf}$)  
+    + Los parámetros de la relación talla-peso (a, b) o pesos medios por talla para cada año.
+
+### Asunciones
+
+Condiciones de equilibrio: la mortalidad por pesca y el reclutamiento han sido constantes.
+
+Selectividad: sigue una curva logística (es plana, no en forma de domo).
+
+Las distribuciones de talla son representativas de la captura.
+
+Parámetros de la historia vital son conocidos (para DLS puede haber incertidumbres).
+
+Un proxy para MSY basado en tallas se define como:  $L_{F=M}$ = 0.75 $L_c$+0.25 $\ L_{inf}$   
+
+### Software 
+El código para estimar los indicadores está disponible en  [github/ICES_tools](https://github.com/ices-tools-dev/LBIndicator_shiny).
+El script *utilities.R* es el código modificado del script generado en WKLIFE V. También existe una app de [Shinny](https://scott.shinyapps.io/LBIndicator_shiny/). 
+\
+\
+
+  
+## Aplicación al stock sur de Abadejo (pol89a)
+
+### Iniciando sesión, cargando librerías
+```{r results='hide', message=FALSE, warning=FALSE}
+library(LBSPR) # se usan algunas funciones gráficas
+library(reshape2)
+library(ggplot2) 
+library(tidyr)
+library(ReporteRs) # para generar tablas y Documento-Resumen (no disponible en CRAN) 
+
+# require (rJava)
+# .jinit()
+# .jcall('java.lang.System','S','getProperty','java.version')
+# [1] "1.8.0_211"
+#devtools::install_github('davidgohel/ReporteRsjars')
+#devtools::install_github('davidgohel/ReporteRs')
+
+source("https://raw.githubusercontent.com/ices-tools-dev/LBIndicator_shiny/master/utilities.R") # incluye la opción de m_k
+source("utilities_vpaz.R") # Función tabla semáforo serie histórica, settings de lb_plot modificados.
+```
+
+Funciones disponibles dentro del script: 
+
+```{r  message=FALSE, warning=FALSE}
+ls()
+```
+### Datos 
+Parámetros ciclo vital que vamos usar para el stock pol89a:
+
+$L_{mat}$ = 42.3 cm. Ambos sexos, Div8c (Alonso-Fernández et al., 2013).   
+
+$L_{inf}$ = 98.2 cm. Stock Div7 (Alemany, 2017).     
+
+M/k = 1.5 (k 0.182 year-1 y M=0.3 (Alemany, 2017)).
+
+a = 0.0000109,  b = 3.0044 (Léauté et al., 2018)  
+
+Cargamos datos de composición de talla del desembarco (descarte < 2%, solo muestreos de talla en 2 años) y peso medio por talla para ambos sexos :
+  
+```{r  message=FALSE, warning=FALSE}
+wal <- read.csv("Pol89awal.csv", stringsAsFactors = FALSE)
+freq <- read.csv("Pol89afreq.csv", stringsAsFactors = FALSE)
+```
+Comprobamos que se han importado bien:
+```{r  message=FALSE, warning=FALSE}
+head(freq)
+head(wal)
+```
+Comprobar si los datos de frecuencia de tallas necesitan agruparse. El objetivo es que la distribución de tallas sea unimodal. Visualmente mediante la función bin_plot:
+
+```{r Figure1,cache= TRUE, message=FALSE, warning=FALSE, fig.cap = "Figure 1. Pollack89a. Length composition of catches binned at bin = 1 cm", fig.align = "center"}
+bin_plot(freq, 1, "cm")
+```
+
+```{r Figure2, cache= TRUE, message=FALSE, warning=FALSE, fig.cap = "Figure 2. Pollack89a. Length composition of catches binned at bin = 2 cm", fig.align = "center"}
+bin_plot(freq, 2, "cm")
+```
+
+```{r Figure3,cache= TRUE, message=FALSE, warning=FALSE, fig.cap = "Figure 3. Pollack89a. Length composition of catches binned at bin = 3 cm", fig.align = "center"}
+bin_plot(freq, 3, "cm")
+```
+
+```{r Figure4,cache= TRUE, message=FALSE, warning=FALSE, fig.cap = "Figure 4. Pollack89a. Length composition of catches binned at bin = 4 cm", fig.align = "center"}
+bin_plot(freq, 4, "cm")
+```
+
+```{r Figure5,cache= TRUE, message=FALSE, warning=FALSE, fig.cap = "Figure 5. Pollack89a. Length composition of catches binned at bin = 5 cm", fig.align = "center"}
+bin_plot(freq, 5, "cm")
+```
+
+
+En 2015 y 2017 se capturaron ejemplares muy pequeños, esto puede ser debido a los metiers FR-GNS_DEF_all_all y SP-TRAWL. Tambien puede ser debido a un muestreo de descartes que está mal asignado a landings, ya que en 2016 el mismo metier, FR-GNS_DEF_all_all,tiene descartes con la misma LD.
+
+
+\
+
+Los datos se agrupan en clases de talla de 4 cm. También se puede ver los datos agregados con el punto medio de la clase de talla:
+
+```{r warning=FALSE}
+bin_mat (freq, 4)
+``` 
+Ahora con una tabla flextable:
+
+```{r warning=FALSE}
+lb_raw_dat (freq, 4, "cm", wal)
+``` 
+
+
+### Estimas
+
+Estimas de los indicadores definidos (y alguno más) y de los ratios:
+
+```{r warning=FALSE}
+lb_ind(freq, 4, 98.2, 42.3, 1.5,wal)
+```
+
+### Gráficos de tendencias temporales
+
+Plots de las estimas de los indicadores y de los ratios:
+
+```{r  Figure6, out.width = "120%", cache= TRUE, fig.cap="Figure 6. Pollack89a Tendencias temporales de los indicadores y de los ratios estimados.", fig.align = "center", dpi=200}
+lb_plot(freq, 4, "cm", 98.2, 42.3, 1.5,wal)
+```
+
+### Tablas semáforo 
+Table 1. Tabla con semáforo del estado del stock en los 3 años más recientes:
+```{r results="asis",warning=FALSE}
+lb_table(freq, 4, "cm", 98.2, 42.3, 1.5,wal)
+```
+
+\
+
+Los dos primeros indicadores reflejan la **conservación de los inmaduros** y el ratio debe ser > 1. Entre 2015 y 2018, la talla de primera captura y la $L_{25\%}$ fueron superiores a la talla de madurez.$L_{max5\%}/L_{inf}$ y $P_{mega}$ indican que el estado de **conservación de los ejemplares de mayor talla**. En los últimos 3 años Pmega siempre fue inferior a 0.3 y $L_{max5\%}/L_{inf}$ sólo en 2018 estuvo por encima del punto de referencia (0.8).  
+
+Según el criterio de **rendimiento óptimo** todos los peces capturados deberían estar dentro del 10% del talla óptima de explotación ($L_{opt}$). $L_{opt}$ representa la talla a la que la biomasa y la produccion de huevos es máxima en una poblacion no explotada y es la talla a la cual la captura es máxima para una determinada F. $L_{mean}/L_{opt}$ sugiere que entre 2015 y 2018,la talla objetivo de la captura está por debajo de la talla óptima de explotación. Esto es consistente con los LBI de conservación observados.  
+
+La **explotación MSY** se consiguió en los dos últimos años, al ser la talla media igual o superior a la $L_{F=M}$.
+
+\
+
+Table 2. Tabla con semáforo del estado del stock en la serie histórica:
+```{r results="asis", warning=FALSE}
+lb_tableSH(freq, 4, "cm", 98.2, 42.3, 1.5,wal)
+
+```
+
+### Asunciones 
+La $L_{inf}$ (98.2 cm) no se observa en las capturas, lo que nos podría estar indicando que la selectividad no es asintótica.
+
+Es probable que las LD empleadas no sean representativa de la captura. De año a año han cambiado los metiers que se muestrean y por lo tanto cambios en LD es probable que sean debidos a diferencias en los muestreos. El porcentaje de la captura muestreada y estimada varía entre años, siendo para 2018 del 15 % muestreada.
+
+### Análisis de sensibilidad
+
+Sensibilidad a los parámetros de ciclo de vida: $L_{mat}$, $L_{inf}$ y M/k
+
+- Rangos $L_{inf}$: 100 cm, 98.2 cm, 80 cm
+
+Table 3a. $L_{inf}$ = 100 cm
+```{r results="asis", warning=FALSE}
+lb_tableSH(freq, 4, "cm", 100, 42.3, 1.5,wal)
+``` 
+\
+
+Table 3b. $L_{inf}$ = 98.2 cm
+```{r results="asis", warning=FALSE}
+lb_tableSH(freq, 4, "cm", 98.2, 42.3, 1.5,wal)
+``` 
+\
+
+Table 3c. $L_{inf}$ = 80 cm
+```{r results="asis", warning=FALSE}
+lb_tableSH(freq, 4, "cm", 80, 42.3, 1.5,wal)
+``` 
+\  
+
+Si Linf está infraestimada la percepción es que el stock está mejor de lo que realmente está. De igual manera, si Linf está sobreestimada la percepcion es que el stock está peor de lo que realmente está.
+ 
+ 
+- Testar distintos valores de M/k: 1.8, 1.5, 0.9  
+
+Table 4a. M/k=1.8
+```{r results="asis", warning=FALSE}
+lb_tableSH(freq, 4, "cm", 98.2, 42.3, 1.8,wal)
+``` 
+
+\  
+
+Table 4b.M/k=1.5
+```{r results="asis", warning=FALSE}
+lb_tableSH(freq, 4, "cm", 98.2, 42.3, 1.5,wal)
+``` 
+
+\ 
+
+Table 4c.M/k=0.9
+```{r results="asis", warning=FALSE}
+lb_tableSH(freq, 4, "cm", 98.2, 42.3, 0.9,wal)
+``` 
+\ 
+
+M/k es una medida de la relacion entre la mortalidad y el crecimiento. En una población no explotada determina la forma de la LFD. Los indicadores a los que afectan son los que su calculo implica este paraámetro: $P_{mega}$, $L_{mean}/L_{opt}$ y $L_{mean}/L_{F=M}$. A un mayor valor de M/K la percepción del estado del stock es más optimista.
+
+\
+
+
+- Rango de valores para Lmat. 
+
+Table 5a. $L_{mat}$ = 55 cm
+```{r results="asis", warning=FALSE}
+lb_tableSH(freq, 4, "cm", 98.2, 55, 1.5,wal)
+``` 
+
+\  
+
+Table 5b. $L_{mat}$ = 42.5 cm
+```{r results="asis", warning=FALSE}
+lb_tableSH(freq, 4, "cm", 98.2, 42.3, 1.5,wal)
+``` 
+
+\  
+
+Table 5c. $L_{mat}$ = 35 cm
+```{r results="asis", warning=FALSE}
+lb_tableSH(freq, 4, "cm", 98.2, 35, 1.5,wal)
+``` 
+\ 
+
+La talla de madurez afecta a los indicadores de conservación de inmaduros ($L_c/L_{mat}$ y $L_{25\%}/L_{mat}$ ). 
+
+### Estado de explotación del abadejo 
+
+Los resultados del método LBI muestran que la mayoría de los 
+indicadores se encuentran por debajo de los puntos de referencia (Tabla 1 y Figura 6). 
+
+$L_{F=M}$, se considera un proxy de MSY y un ratio $L_{mean}/L_{F=M}$ >= 1 indicaría que el stock está siendo explotado a/por debajo de $F_{MSY}$. El stock pol89a está siendo explotado a/por debajo de Fmsy ya que en 2017 y 2018 $L_{mean}/L_{F=M}$ fue igual o superior a 1.
+
+
+## Aplicación al stock sur de rape blanco (mon8c9a)
+
+Debido a que el reclutamiento del rape ocurre por pulsos las condiciones de equilibrio que asumen los métodos LBI no se cumplen para esta especie. Sin embargo, se han aplicado igualmente a modo de ejercicio.
+
+
+### Datos
+$L_{mat}$ =  61.84 cm, ambos sexos (Quincoces, 2002).   
+$L_{inf}$ = 174.2 cm (estimada modelo de evaluación).
+
+M/k = 1.5. (M=2, k=0.11, asumidas en el modelo de evaluación). 
+
+$a = 2.5*10^-5$,  b = 2.853  (Landa and Antolínez, 2017).  
+
+Cargamos datos de composición de talla del desembarco (descarte < 5%) y peso medio por talla para ambos sexos :
+
+```{r  message=FALSE, warning=FALSE}
+monwal <- read.csv("Monwal.csv", stringsAsFactors = FALSE)
+monfreq <- read.csv("Monfreq.csv", stringsAsFactors = FALSE)
+```
+Comprobamos que se han importado bien:
+```{r  message=FALSE, warning=FALSE}
+head(monfreq)
+head(monwal)
+```
+
+Comprobar si los datos de frecuencia de tallas necesitan agruparse. El objetivo es que la distribución de tallas sea unimodal. Visualmente mediante la función bin_plot:
+
+```{r Figure7,cache= FALSE, message=FALSE, warning=FALSE, fig.cap = "Figure 7. Mon89a. Length composition of catches binned at bin = 2 cm", fig.align = "center"}
+bin_plot(monfreq, 2, "cm")
+```
+
+```{r Figure8, cache= TRUE, message=FALSE, warning=FALSE, fig.cap = "Figure 8. Mon89a. Length composition of catches binned at bin = 4 cm", fig.align = "center"}
+bin_plot(monfreq, 4, "cm")
+```
+
+```{r Figure9,cache= TRUE, message=FALSE, warning=FALSE, fig.cap = "Figure 9. Mon89a. Length composition of catches binned at bin = 6 cm", fig.align = "center"}
+bin_plot(monfreq, 6, "cm")
+```
+
+```{r Figure10,cache= TRUE, message=FALSE, warning=FALSE, fig.cap = "Figure 10. Mon89a. Length composition of catches binned at bin = 8 cm", fig.align = "center"}
+bin_plot(monfreq, 8, "cm")
+```
+
+\ 
+
+Los datos se agrupan en clases de talla de 8 cm. 
+
+
+### Estimas
+
+Estimas de los indicadores definidos y de los ratios:
+
+```{r  }
+lb_ind(monfreq, 8, 174.2, 61.84, 1.5, monwal)
+```
+
+La $L_c$ varía mucho entre años, con valores entre 28 y 68 cm. Esto afecta a la estima de $L_{FeM}$ que tiene una gran variabilidad interanual (64 y 94 cm). Los bajos reclutamientos de los 4 años últimos años (detectados por la evaluación analítica) tienen un efecto en la Lc de 2018, que es la más alta de la serie histórica ($L_{c2018}$ = 68 cm y $L_{mean2018}$ = 83 cm).
+
+
+### Gráficos de tendencias temporales
+
+Plots de las estimas de los indicadores y de los ratios:
+
+```{r  Figure11, out.width = "100%", cache= FALSE, fig.cap="Figure 11. Mon89a Tendencias temporales de los indicadores y de los ratios estimados.", fig.align = "center", dpi=200}
+lb_plot(monfreq, 8, "cm", 174.2, 61.84, 1.5,monwal)
+```
+
+### Tablas semáforo 
+Table 6. Tabla con semáforo del estado del stock en los 3 años más recientes:
+```{r results="asis", warning=FALSE}
+lb_table (monfreq, 8, "cm", 174.2, 61.84, 1.5, monwal)
+```
+
+\
+
+Table 7. Tabla con semáforo del estado del stock en la serie histórica:
+
+```{r results="asis", warning=FALSE}
+lb_tableSH(monfreq, 8, "cm", 174.2, 61.84, 1.5,monwal)
+```
+
+\
+
+
+Los indicadores de conservación de inmaduros están por encima de los PR en el 2018, aunque la evaluación analítica del stock nos indica que es debido a muy bajos reclutamientos de los años previos. Esto nos confirma que los LBI no son indicadores apropiados para esta especie. 
+
+Los valores de $L_{mean}/L_{F=M}$ nos indicarían que este stock, excepto para el año 2000, nunca ha sido explotado a $F_{MSY}$.
+
+
+## Bibliografía
+
+Alemany, J. 2017. Développement d'un cadre Bayésien pour l'évaluation de stocks à données limitées et élaboration de scénarios de gestion, cas particuliers de la seiche (Sepia officinalis) et du lieu jaune (Pollachius pollachius). Ph.D. Thesis. Université Caen Normandie. 262 pp.
+
+Alonso-Fernández A., Villegas-Rios, D., Valdés-López, M., Olveira-Rodríguez, B. and Saborido-Rey, F. (2013). Reproductive biology of pollack (Pollachius pollachius) from the Galician shelf (north-west Spain). Journal of the Marine Biological Association of the United Kingdom, 2013, 93(7): 1951-1963.
+
+Froese, R. 2004. Keep it simple: three indicators to deal with overfishing. Fish and Fisheries, 5 (1): 86-91.
+
+ICES. 2015. Report of the Fifth Workshop on the Development of Quantitative Assessment Methodologies based on Life-history Traits, Exploitation Characteristics and other Relevant Parameters for Data-limited Stocks (WKLIFE V), 5-9 October 2015, Lisbon, Portugal. ICES CM 2015/ACOM:56.
+
+ICES. 2018. ICES reference points for stocks in categories 3 and 4. ICES Technical Guidelines. Publicado 02/2018. disponible: <<http://ices.dk/sites/pub/Publication%20Reports/Guidelines%20and%20Policies/16.04.03.02_Category_3-4_Reference_Points.pdf>>
+
+Landa, J. and A. Antolínez. 2017. Weight-length relationships, weight conversion factors and somatic indices from two stocks of black anglerfish ( Lophius budegassa) and white anglerfish (L. piscatorius) in north-eastern Atlantic waters. Regional Studies in Marine Science, 23:87-96.
+
+Léauté, J-P, Caill-Milly,N., Lissardy, M. ROMELIGO: Improvement of the fishery knowledge of striped red mullet, whiting and pollack of the Bay of Biscay. WD presented at WGBIE2018.
+
+Quincoces, I. 2002. Crecimiento y reproducción de las especies Lophius budegassa Spinola 1807, y Lophius piscatorius Linneo 1758, del Golfo de Vizcaya. PhD Thesis. Basque Country University. 276 pp.

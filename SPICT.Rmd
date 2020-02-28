@@ -1,0 +1,242 @@
+---
+title: "Stochastic surplus production model in continuous time (SPiCT)"
+author: "M. Grazia"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    number_sections: yes
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Back-ground
+Surplus production modelling has a long history as a method for managing data-limited fish stocks. Recent advancements have cast surplus production models as state-space models that separate random variability of stock dynamics from error in observed indices of biomass. We present a stochastic surplus production model in continuous time (SPiCT), which in addition to stock dynamics also models the dynamics of the fisheries. This enables error in the catch process to be reflected in the uncertainty of estimated model parameters and management quantities. Benefits of the continuous-time state-space model formulation include the ability to pro- vide estimates of exploitable biomass and fishing mortality at any point in time from data sampled at arbitrary and possibly irregular intervals. 
+
+## SPICT data needed
+Data requested are: 
+
+- A representative time-series of species catch.
+
+- A rapresentative time-series of species biomass.
+
+- The estimation can be done using more than one biomass index, for example when scientific surveys are performed more than once every year or when there are both commercial and survey CPUE time-series available.
+
+## SPICT Assumptions
+- Catch data should be representative of both landings and bycatch. It is also possible to use a time series of landings, but then the interpretation of the results is changed. If available, seasonal catches should be used as input. Catches are assumed to be taken over a period of time (e.g. years or quarters). 
+
+- Stock size indices should be in terms of biomass (not numbers) and representative of the exploitable stock biomass (ESB).Stock size indices should be in terms of biomass (not numbers) and representative of the exploitable stock biomass (ESB).
+
+## Installing and loading the Package
+The SPICT package can be installed from GitHub using the `devtools` package:
+```{r, eval=FALSE}
+install.packages("devtools")
+devtools::install_github("mawp/spict/spict")
+```
+Or you can use:
+
+```{r, eval=FALSE}
+install.packages("remotes")
+install_github("DTUAqua/spict/spict") 
+```
+Once libraries are installed can be loaded in the workspace:
+
+```{r}
+library(spict)
+library(icesAdvice)
+```
+
+#Loading built-in example data
+Once libraries are installed we read data of the stock of the Solea Sole 8c9a. For this stock we have a short time-series of catch (2011-2018). Discards are negligible and are included in this time-series. The biomass index is the one derived from the DEMERSALES survey. In this case study all the values are in tons.
+
+```{r}
+setwd("~/Downloads/Taller_SPICT/Data")#change with your directory
+load("data.RData") 
+str(data)
+```
+
+
+Firstly, we create the **inp** object for the model. Note data are structured as:
+
+- obsC (catch observations), 
+- timeC (time of catch observations), 
+- obsI (index of abundance), 
+- timeI (time of obs abundance). 
+
+Catches are assumed to be taken over a period of time (e.g. years or quarters). It is important to specify in **timeC** and **timeI** the beginning of each catch interval (e.g. 2002.25 and 2002.75 for the second and fourth quarter catches, respectively). Additionally, the time vector **inp$dtc** should reflect the length of each time interval (e.g. 1 for annual and 0.25 for quarterly catches, respectively). If times are not specified it is assumed that the first observation is observed at time 1 and then sequentially onward with a time step of one year.
+
+```{r}
+inp <- list(timeC=data$Year, obsC=data$Cathes_tons, obsI=data$Abundance_tons, timeI=data$Year)
+inp=check.inp(inp)
+inp$dtc
+```
+
+#Plotting data
+The data can be plotted using the command
+
+```{r}
+plotspict.data(inp)
+```
+
+Note that the number of catch and index observations are given in the respective plot headers. Furthermore, the color of individual points shows the month when the observation was made and the corresponding colors are shown in the color legend in the top right corner. Example:
+
+```{r}
+inp <- list(timeC=data$Year, obsC=data$Cathes_tons, obsI=data$Abundance_tons, timeI=data$Year+0.9)
+plotspict.data(inp)
+```
+
+```{r, include=FALSE}
+inp <- list(timeC=data$Year, obsC=data$Cathes_tons, obsI=data$Abundance_tons, timeI=data$Year)
+inp=check.inp(inp)
+inp$dtc
+```
+
+#Advanced data plotting
+There is also a more advanced function for plotting data, which at the same time does some basic model fitting (linear regression) and shows the results
+
+```{r}
+plotspict.ci(inp)
+```
+
+In the plot the dashed horizontal line representes a MSY guessed from a linear regression between the biomass index and the catch divided by the index (middle left plot). The regression is expected to have a negative slop. The plot in the middle row, on the right is obtained from catch versus catch/index to approximately find the optimal effort (or effort proxy).
+Proportional increase in the index as a function of catch (bottom row, right).
+Positive increases in index at large catches could indicate model violations.
+
+#Fitting the model
+The model is fitted to data by running
+```{r}
+res <- fit.spict(inp)
+```
+
+The results are summarised using
+```{r}
+capture.output(summary(res))
+```
+
+#Interpreting plots of results
+The basic plotting of the results is done using the generic function plot that produces a multipanel plot with the most important outputs.
+```{r}
+plot(res)
+```
+
+Some general comments can be made regarding the style and colours of these plots: 
+
+- Estimates (biomass, fishing mortality, catch, production) are shown using blue lines.
+- 95 CIs of absolute quantities are shown using dashed blue lines.
+- 95 CIs of relative biomass and fishing mortality are shown using shaded blue regions.
+- Estimates of reference points (BMSY , FMSY , MSY ) are shown using black lines.
+- 95 CIs of reference points are shown using grey shaded regions.
+- The end of the data range is shown using a vertical grey line.
+- Predictions beyond the data range are shown using dotted blue lines.
+- Data are shown using points colored by season. Different index series use different point characters (notshown here).
+
+# Checklist for the acceptance of a SPiCT assessment 
+- 1: Convergence of the model fit, which has code 0 if the fit was succesful. If this is not the case convergence was not obtained and reported results should not be used.
+
+```{r}
+res$opt$convergence 
+```
+- 2: All variance parameters of the model parameters are finite should be TRUE
+
+```{r}
+all(is.finite(res$sd))  
+```
+- 3: No violation of model assumptions based on one-step-ahead residuals (bias, auto-correlation, normality).This means, that p-values are insignificant (??? 0.05), indicated by green titles in the graphs of spictplot.diagnostics(fit). Slight violations of these assumptions do not necessarily invalidate model results.
+```{r}
+res <- calc.osa.resid(res)
+plotspict.diagnostic(res)
+```
+
+The first column of the plot contains information related to catch data and the second column contains information related to the biomass index data. The rows contain:
+
+- Log of the input data series.
+- OSA residuals with the p-value of a test for bias (i.e. that the mean of the residuals is different from zero) in the plot header. If the header is green the test was not significant, otherwise the header wouldbe red.
+- Empirical autocorrelation of the residuals. Two tests for significant autocorrelation is performed.
+Ljung-Box simultaneous test of multiple lags (here 4) with p-value shown in the header, and tests for
+individual lags shown by dashed horizontal lines in the plot. Here no violation is identified.
+- Tests for normality of the residuals both as a QQ-plot and with a Shapiro test with p-value shown invthe plot header.
+
+
+- 4: Consistent patterns in the retrospective analysis. This means that there is no tendency of consistent under- or overestimation of the relative fishing mortality F and relative biomass B in successive assessment. The retrospective trajectories of those two quantities should be inside 
+the confidence intervals of the base run. (fit <- fit.retro(fit))
+
+```{r}
+rep=retro(res, nretroyear=3)
+plotspict.retro(rep)
+```
+
+- 5. Realistic production curve. The shape of the production curve should not be too skewed. 
+BMSY/K should be between 0.1 and 0.9 Low values of BMSY/K allow for an infinite population growth rate K.  calc.bmsyk(res)
+
+- 6. It is prudent to check that the same parameter estimates are obtained if using different initial values. If the optimum of the objective function is poorly defined, i.e. possibly containing multiple optima, it is possible that different parameter estimates will be returned depending on the initial values. To check whether this is the case run
+
+```{r}
+check.ini(inp, ntrials=4)
+```
+
+The argument **ntrials** set the number of different initial values to test for. For real data cases 30 trials shoudl be usee at minimum. The **propchng** contains the proportional change of the new randomly generated initial value relative to the base initial value, **inimat** contains the new randomly generated initial values, and **resmat** contains the resulting parameter estimates and a distance from the estimated parameter vector to the base parameter vector. The distance should preferably be close to zero. If that is not the case further investigation is required, i.e. inspection of objective function values, differences in results and residual diagnostics etc. should be performed. The example shown here looks fine in that all converged runs return the same parameter estimates. 
+
+- 7. High assessment uncertainty can indicate a lack of contrast in the input data or violation of
+the ecological model assumptions. The main variance parameters (logsdb, logsdc, logsdi, logsdf)
+should not be unrealistically high. Confidence intervals for B and F should not span more
+than 1 order of magnitude (calc.om(res)).
+
+
+#Setting initial parameter values
+Initial parameter values used as starting guess of the optimiser can be set using **inp$ini**. For example, to specify the initial value of **logK** set:
+```{r}
+inp$ini$logK <- log(100)
+```
+
+This procedure generalises to all other model parameters. If initial values are not specified they are set to default values. To see the default initial value of a parameter run:
+```{r}
+inp$ini$logK
+```
+
+This can also be done posterior to fitting the model by printing:
+
+```{r}
+res$inp$ini$logK
+```
+
+# Extract values
+Once the model is selected values can be extracted with tables as
+
+```{r, include=FALSE}
+xtab<-function(x,caption='Table X.', file=stdout(), width='"100%"', cornername='', dec=rep(1,ncol(x))){
+  nc<-ncol(x)
+  lin<-paste('<table width=',width,'>', sep='')
+  lin<-c(lin,sub('$','</td></tr>',sub('\\. |\\.$','.</b> ',
+                                      sub('^', paste('<tr><td colspan=',nc+1,'><b>',sep=''), caption))))
+  hr<-paste('<tr><td colspan=',nc+1,'><hr noshade></td></tr>', sep='')
+  lin<-c(lin,hr)
+  cnames<-colnames(x)
+  cnames<-paste(sub('$','</b></td>',sub('^','<td align=right><b>',cnames)), collapse='\t')
+  lin<-c(lin,paste('<tr>',paste('<td align=left><b>',cornername,'</b></td>',sep=''),cnames,'</tr>'))
+  lin<-c(lin,hr)
+  rnames<-sub('$','</b></td>',sub('^','<tr> <td align=left><b>',rownames(x)))
+  #x<-sapply(1:ncol(x),function(i)sub('NA','  ',format(round(x[,i],dec[i]))))
+  x<-sapply(1:ncol(x),function(i)sub('NA','  ',formatC(round(x[,i],dec[i]),digits=dec[i], format='f')))
+  for(i in 1:nrow(x)){
+    thisline<-paste(rnames[i],paste(sub('$','</td>',sub('^','<td align=right>',x[i,])), collapse='\t'),'</tr>', sep='')
+    lin<-c(lin,thisline)
+  }
+  lin<-c(lin,hr)
+  lin<-c(lin,'</table><br>\n')
+  writeLines(lin,con=file)
+}
+
+```
+```{r}
+tab1 <- sumspict.parest(res);tab1
+tab2 <- sumspict.srefpoints(res);tab2
+tab3 <- sumspict.states(res);tab3
+tab4 <- sumspict.predictions(res);tab4
+```
+See also script fot others possible tables.
